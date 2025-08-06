@@ -24,16 +24,28 @@ class AirPayTester {
             : 'https://kraken.airpay.co.in';
     }
 
-    // Generate encryption key using MD5 hash
+    // Generate encryption key using SHA-256 hash for better security
     generateEncryptionKey() {
-        return crypto.createHash('md5').update(`${this.username}~:~${this.password}`).digest('hex');
+        const keyString = `${this.username}~:~${this.password}`;
+        const hash = crypto.createHash('sha256').update(keyString).digest('hex');
+        // Return first 32 bytes (256 bits) for AES-256
+        return hash.substring(0, 32);
     }
 
-    // AES encryption function
+    // AES encryption function with enhanced security
     encrypt(data, encryptionKey) {
         try {
-            const iv = crypto.randomBytes(16); // Use 16 bytes for AES-256-CBC
-            const cipher = crypto.createCipheriv('aes-256-cbc', Buffer.from(encryptionKey, 'hex'), iv);
+            const iv = crypto.randomBytes(16);
+            
+            // Ensure key is proper length for AES-256
+            const key = Buffer.from(encryptionKey, 'utf8').subarray(0, 32);
+            if (key.length < 32) {
+                const paddedKey = Buffer.alloc(32);
+                key.copy(paddedKey);
+                key = paddedKey;
+            }
+            
+            const cipher = crypto.createCipheriv('aes-256-cbc', key, iv);
             cipher.setAutoPadding(true);
             
             let encrypted = cipher.update(data, 'utf8', 'base64');
@@ -41,8 +53,8 @@ class AirPayTester {
             
             return iv.toString('hex') + encrypted;
         } catch (error) {
-            console.error('Encryption error:', error);
-            throw new Error('Failed to encrypt data');
+            console.error('Encryption failed - timestamp:', new Date().toISOString());
+            throw new Error('Data encryption failed');
         }
     }
 

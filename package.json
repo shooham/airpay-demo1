@@ -4,10 +4,29 @@
   "description": "Official AirPay Payment Gateway Integration for Node.js - Complete production-ready implementation with AES encryption, OAuth2 authentication, and comprehensive security features",
   "main": "controllers/gateways/airpayController.js",
   "scripts": {
+    "start": "node app.js",
+    "dev": "NODE_ENV=development node app.js",
+    "prod": "NODE_ENV=production node app.js",
     "setup": "node scripts/addAirPayGateway.js",
     "test": "node scripts/testAirPayIntegration.js",
     "validate": "node scripts/validateIntegration.js",
-    "install-deps": "npm install axios mongoose express dotenv"
+    "security-test": "node scripts/securityTest.js",
+    "install-deps": "npm install",
+    "test-ip-whitelist": "node -e \"const {ipWhitelist} = require('./middleware/ipWhitelist'); console.log('IP Whitelist Test:', ipWhitelist.isIPInCIDR('103.25.232.100', '103.25.232.0/24'));\"",
+    "audit": "npm audit && npm audit fix",
+    "logs": "tail -f logs/info.log",
+    "logs-error": "tail -f logs/error.log",
+    "health": "curl -s http://localhost:3000/health | jq",
+    "cleanup": "node -e \"require('./config/database').cleanupExpiredDocuments().then(count => console.log('Cleaned:', count))\"",
+    "db-stats": "node -e \"require('./config/database').getStats().then(stats => console.log(JSON.stringify(stats, null, 2)))\"",
+    "deploy": "node scripts/deploy.js",
+    "deploy-docker": "node scripts/deploy.js --docker",
+    "deploy-quick": "node scripts/deploy.js --skip-tests",
+    "pm2-start": "pm2 start ecosystem.config.js",
+    "pm2-stop": "pm2 stop airpay-gateway",
+    "pm2-restart": "pm2 restart airpay-gateway",
+    "pm2-logs": "pm2 logs airpay-gateway",
+    "pm2-monit": "pm2 monit"
   },
   "keywords": [
     "airpay",
@@ -34,7 +53,14 @@
     "axios": "^1.6.0",
     "mongoose": "^7.0.0",
     "express": "^4.18.0",
-    "dotenv": "^16.0.0"
+    "dotenv": "^16.0.0",
+    "express-rate-limit": "^7.1.0",
+    "rate-limit-mongo": "^2.3.2",
+    "helmet": "^7.1.0",
+    "express-validator": "^7.0.1",
+    "cors": "^2.8.5",
+    "jsonwebtoken": "^9.0.2",
+    "socket.io": "^4.7.4"
   },
   "devDependencies": {
     "@types/node": "^20.0.0"

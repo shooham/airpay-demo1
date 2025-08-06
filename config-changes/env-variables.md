@@ -20,6 +20,11 @@ AIRPAY_CLIENT_SECRET=your_client_secret_here
 # Domain URL for payment processing (Required)
 DOMAIN_URL=https://yourdomain.com
 
+# IP Whitelisting Configuration
+AIRPAY_WHITELIST_IPS=103.25.232.0/24,103.25.233.0/24,202.131.96.0/24,103.231.78.0/24
+ADMIN_WHITELIST_IPS=127.0.0.1,::1,your.office.ip.address
+BYPASS_IP_WHITELIST=false
+
 # Optional: Custom API URLs (use defaults if not specified)
 # AIRPAY_PAYMENT_URL=https://payments.airpay.co.in
 # AIRPAY_API_URL=https://kraken.airpay.co.in

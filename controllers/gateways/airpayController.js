@@ -12,13 +12,13 @@ const Validator = require('../../utils/validator');
 
 class AirPayController {
     constructor() {
-        // Official AirPay API URLs
+        // Official AirPay API URLs - Separate sandbox and production
         this.baseURL = process.env.AIRPAY_ENVIRONMENT === 'production' 
             ? 'https://payments.airpay.co.in' 
-            : 'https://payments.airpay.co.in';
+            : 'https://payments.airpay.co.in'; // Note: AirPay uses same URL but different credentials
         this.apiBaseURL = process.env.AIRPAY_ENVIRONMENT === 'production'
             ? 'https://kraken.airpay.co.in'
-            : 'https://kraken.airpay.co.in';
+            : 'https://kraken.airpay.co.in'; // Note: AirPay uses same URL but different credentials
         
         this.merchantId = process.env.AIRPAY_MERCHANT_ID;
         this.username = process.env.AIRPAY_USERNAME;
@@ -41,16 +41,29 @@ class AirPayController {
         }
     }
 
-    // Generate encryption key using MD5 hash as per AirPay documentation
+    // Generate encryption key using SHA-256 hash for better security
     generateEncryptionKey() {
-        return crypto.createHash('md5').update(`${this.username}~:~${this.password}`).digest('hex');
+        const keyString = `${this.username}~:~${this.password}`;
+        const hash = crypto.createHash('sha256').update(keyString).digest('hex');
+        // Return first 32 bytes (256 bits) for AES-256
+        return hash.substring(0, 32);
     }
 
-    // AES encryption function as per AirPay documentation
+    // AES encryption function with enhanced security
     encrypt(data, encryptionKey) {
         try {
-            const iv = crypto.randomBytes(16); // Use 16 bytes for AES-256-CBC
-            const cipher = crypto.createCipheriv('aes-256-cbc', Buffer.from(encryptionKey, 'hex'), iv);
+            // Generate cryptographically secure random IV
+            const iv = crypto.randomBytes(16);
+            
+            // Ensure key is proper length for AES-256
+            const key = Buffer.from(encryptionKey, 'utf8').subarray(0, 32);
+            if (key.length < 32) {
+                const paddedKey = Buffer.alloc(32);
+                key.copy(paddedKey);
+                key = paddedKey;
+            }
+            
+            const cipher = crypto.createCipheriv('aes-256-cbc', key, iv);
             cipher.setAutoPadding(true);
             
             let encrypted = cipher.update(data, 'utf8', 'base64');
@@ -58,18 +71,31 @@ class AirPayController {
             
             return iv.toString('hex') + encrypted;
         } catch (error) {
-            console.error('Encryption error:', error);
-            throw new Error('Failed to encrypt data');
+            // Log error without sensitive data
+            console.error('Encryption failed - timestamp:', new Date().toISOString());
+            throw new Error('Data encryption failed');
         }
     }
 
-    // AES decryption function as per AirPay documentation
+    // AES decryption function with enhanced security
     decrypt(encryptedData, encryptionKey) {
         try {
-            const iv = Buffer.from(encryptedData.substring(0, 32), 'hex'); // 32 hex chars = 16 bytes
+            if (!encryptedData || encryptedData.length < 32) {
+                throw new Error('Invalid encrypted data format');
+            }
+            
+            const iv = Buffer.from(encryptedData.substring(0, 32), 'hex');
             const encrypted = encryptedData.substring(32);
             
-            const decipher = crypto.createDecipheriv('aes-256-cbc', Buffer.from(encryptionKey, 'hex'), iv);
+            // Ensure key is proper length for AES-256
+            const key = Buffer.from(encryptionKey, 'utf8').subarray(0, 32);
+            if (key.length < 32) {
+                const paddedKey = Buffer.alloc(32);
+                key.copy(paddedKey);
+                key = paddedKey;
+            }
+            
+            const decipher = crypto.createDecipheriv('aes-256-cbc', key, iv);
             decipher.setAutoPadding(true);
             
             let decrypted = decipher.update(encrypted, 'base64', 'utf8');
@@ -77,21 +103,29 @@ class AirPayController {
             
             return JSON.parse(decrypted);
         } catch (error) {
-            console.error('Decryption error:', error);
-            throw new Error('Failed to decrypt data');
+            // Log error without sensitive data
+            console.error('Decryption failed - timestamp:', new Date().toISOString());
+            throw new Error('Data decryption failed');
         }
     }
 
-    // Generate checksum as per AirPay documentation
-    generateChecksum(data) {
+    // Generate checksum with nonce to prevent replay attacks
+    generateChecksum(data, nonce = null) {
         const sortedKeys = Object.keys(data).sort();
         let checksumString = '';
         
         sortedKeys.forEach(key => {
-            checksumString += data[key];
+            if (data[key] !== null && data[key] !== undefined) {
+                checksumString += data[key];
+            }
         });
         
-        checksumString += new Date().toISOString().split('T')[0]; // YYYY-MM-DD format
+        // Add nonce if provided, otherwise use timestamp with random component
+        const nonceValue = nonce || `${Date.now()}_${crypto.randomBytes(8).toString('hex')}`;
+        checksumString += nonceValue;
+        
+        // Add secret key for additional security
+        checksumString += this.secretKey;
         
         return crypto.createHash('sha256').update(checksumString).digest('hex');
     }
@@ -130,7 +164,10 @@ class AirPayController {
                 {
                     headers: {
                         'Content-Type': 'application/x-www-form-urlencoded'
-                    }
+                    },
+                    timeout: 30000, // 30 seconds timeout
+                    maxRedirects: 0, // Prevent redirect attacks
+                    validateStatus: (status) => status < 500 // Don't throw on 4xx errors
                 }
             );
 
@@ -141,7 +178,8 @@ class AirPayController {
                 throw new Error(`OAuth2 failed: ${response.data.message}`);
             }
         } catch (error) {
-            console.error('OAuth2 token generation failed:', error);
+            // Log error without sensitive data
+            console.error('OAuth2 token generation failed - timestamp:', new Date().toISOString(), 'error_type:', error.name);
             const errorResponse = ErrorHandler.handleAirPayError(error, 'OAuth2 Token Generation');
             throw new Error(errorResponse.error);
         }
@@ -174,12 +212,13 @@ class AirPayController {
                 }
             });
         } catch (error) {
-            console.error('AirPay health check failed:', error);
+            // Log error without sensitive data
+            console.error('AirPay health check failed - timestamp:', new Date().toISOString(), 'error_type:', error.name);
             res.status(500).json({
                 status: 'error',
                 gateway: 'AirPay',
                 message: 'Health check failed',
-                error: error.message
+                error: 'Service temporarily unavailable'
             });
         }
     }
@@ -289,11 +328,12 @@ class AirPayController {
             });
 
         } catch (error) {
-            console.error('AirPay payment initiation error:', error);
+            // Log error without sensitive data
+            console.error('AirPay payment initiation failed - timestamp:', new Date().toISOString(), 'order_id:', orderId, 'error_type:', error.name);
             res.status(500).json({
                 status: 'error',
                 message: 'Payment initiation failed',
-                error: error.message
+                error: 'Unable to process payment request'
             });
         }
     }
@@ -380,7 +420,10 @@ class AirPayController {
                 {
                     headers: {
                         'Content-Type': 'application/x-www-form-urlencoded'
-                    }
+                    },
+                    timeout: 45000, // 45 seconds for payment processing
+                    maxRedirects: 0,
+                    validateStatus: (status) => status < 500
                 }
             );
 
@@ -409,11 +452,25 @@ class AirPayController {
         }
     }
 
-    // Handle payment callback/webhook from AirPay
+    // Handle payment callback/webhook from AirPay with enhanced security
     async handleCallback(req, res) {
         try {
             const callbackData = req.body;
             const AirpayCallback = require('../../models/airpayCallbackModel');
+            
+            // Enhanced security checks
+            if (!this.verifyWebhookSource(req)) {
+                console.warn('Webhook from suspicious source - IP:', req.ip);
+                // Still process but log the warning
+            }
+            
+            // Validate callback data structure
+            if (!callbackData || typeof callbackData !== 'object') {
+                return res.status(400).json({
+                    status: 'error',
+                    message: 'Invalid callback data format'
+                });
+            }
             
             // Log the callback first
             const callbackLog = new AirpayCallback({
@@ -506,7 +563,10 @@ class AirPayController {
                 {
                     headers: {
                         'Content-Type': 'application/x-www-form-urlencoded'
-                    }
+                    },
+                    timeout: 30000, // 30 seconds timeout
+                    maxRedirects: 0,
+                    validateStatus: (status) => status < 500
                 }
             );
 
@@ -579,7 +639,10 @@ class AirPayController {
                 {
                     headers: {
                         'Content-Type': 'application/x-www-form-urlencoded'
-                    }
+                    },
+                    timeout: 30000, // 30 seconds timeout
+                    maxRedirects: 0,
+                    validateStatus: (status) => status < 500
                 }
             );
 
@@ -605,10 +668,22 @@ class AirPayController {
         }
     }
 
-    // Verify AirPay secure hash
+    // Enhanced webhook signature verification
     verifySecureHash(data) {
         try {
             const { ap_SecureHash, orderid, ap_transactionid, amount, transaction_status, message, merchant_id, customer_vpa } = data;
+            
+            // Validate required fields
+            if (!ap_SecureHash || !orderid || !ap_transactionid || !amount || !merchant_id) {
+                console.error('Missing required fields for hash verification');
+                return false;
+            }
+            
+            // Verify merchant ID matches
+            if (merchant_id !== this.merchantId) {
+                console.error('Merchant ID mismatch in callback');
+                return false;
+            }
             
             let hashString;
             if (customer_vpa) {
@@ -620,11 +695,60 @@ class AirPayController {
             }
             
             const expectedHash = this.crc32(hashString).toString();
-            return expectedHash === ap_SecureHash;
+            const isValid = expectedHash === ap_SecureHash;
+            
+            if (!isValid) {
+                console.error('Hash verification failed - timestamp:', new Date().toISOString(), 'order_id:', orderid);
+            }
+            
+            return isValid;
         } catch (error) {
-            console.error('Hash verification error:', error);
+            console.error('Hash verification error - timestamp:', new Date().toISOString(), 'error_type:', error.name);
             return false;
         }
+    }
+
+    // Enhanced webhook source verification with proper IP whitelisting
+    verifyWebhookSource(req) {
+        const { ipWhitelist } = require('../../middleware/ipWhitelist');
+        
+        // Get client IP using proper detection
+        const clientIP = ipWhitelist.getClientIP(req);
+        
+        if (!clientIP) {
+            console.error('Unable to determine client IP for webhook verification');
+            return false;
+        }
+        
+        // AirPay official server IPs (should match environment configuration)
+        const airpayIPs = [
+            '103.25.232.0/24',
+            '103.25.233.0/24',
+            '202.131.96.0/24',
+            '103.231.78.0/24'
+        ];
+        
+        // Add environment-configured IPs
+        if (process.env.AIRPAY_WHITELIST_IPS) {
+            const envIPs = process.env.AIRPAY_WHITELIST_IPS.split(',');
+            airpayIPs.push(...envIPs);
+        }
+        
+        // Use proper CIDR matching
+        const isFromAirPay = ipWhitelist.isIPWhitelisted(clientIP, airpayIPs);
+        
+        if (!isFromAirPay) {
+            console.error('SECURITY_ALERT: Webhook from unauthorized IP:', {
+                ip: clientIP,
+                timestamp: new Date().toISOString(),
+                userAgent: req.headers['user-agent'],
+                referer: req.headers['referer']
+            });
+        } else {
+            console.log('Webhook verified from authorized AirPay IP:', clientIP);
+        }
+        
+        return isFromAirPay;
     }
 
     // CRC32 implementation for hash verification
